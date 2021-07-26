@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
+	"github.com/chenzhiwei/heze/pkg/fetch"
 	"github.com/chenzhiwei/heze/pkg/image"
 )
 
@@ -40,6 +42,18 @@ func runFetch(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Image URL: %s\n", img)
+
+	ctx := context.TODO()
+
+	fc := &fetch.ImageFetcher{
+		Username: username,
+		Password: password,
+	}
+
+	manifest, err := fc.FetchManifest(ctx, img)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Image Manifest: %s\n", manifest)
 	return nil
 }

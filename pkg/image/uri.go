@@ -3,6 +3,7 @@ package image
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -15,21 +16,20 @@ var (
 	errInvalidImageFormat = errors.New("invalid image format")
 )
 
-type imageUrl struct {
-	HttpSchema string
-	Schema     string
-	Host       string
-	Port       int
-	Name       string
-	Tag        string
-	Digest     string
+type ImageUrl struct {
+	Schema string
+	Host   string
+	Port   int
+	Name   string
+	Tag    string
+	Digest string
 }
 
-// NewImageUrl initialize an imageUrl struct
+// NewImageUrl initialize an ImageUrl struct
 // still need some rules to guard the invalid image format
-func NewImageUrl(url string) (*imageUrl, error) {
+func NewImageUrl(url string) (*ImageUrl, error) {
 	url = strings.ToLower(url)
-	i := &imageUrl{}
+	i := &ImageUrl{}
 
 	var fullPath string
 	secs := strings.Split(url, "://")
@@ -123,7 +123,7 @@ func NewImageUrl(url string) (*imageUrl, error) {
 	return i, nil
 }
 
-func (i *imageUrl) String() string {
+func (i *ImageUrl) String() string {
 	var fullName string
 	if i.Tag != "" {
 		fullName = i.Name + ":" + i.Tag
@@ -146,6 +146,29 @@ func (i *imageUrl) String() string {
 	return i.Schema + "://" + fullHost + "/" + fullName
 }
 
-func (i *imageUrl) ManifestURL() string {
-	return ""
+func (i *ImageUrl) ManifestURL() string {
+	ref := defaultTag
+	if i.Tag != "" {
+		ref = i.Tag
+	}
+
+	if i.Digest != "" {
+		ref = i.Digest
+	}
+
+	host := i.Host
+	if i.Port != 0 && i.Port != 443 && i.Port != 80 {
+		host = host + ":" + strconv.Itoa(i.Port)
+	}
+
+	return "https://" + path.Join(host, "v2", i.Name, "manifests", ref)
+}
+
+func (i *ImageUrl) fullHost() string {
+	host := i.Host
+	if i.Port != 0 && i.Port != 443 && i.Port != 80 {
+		host = host + ":" + strconv.Itoa(i.Port)
+	}
+
+	return host
 }
