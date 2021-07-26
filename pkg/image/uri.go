@@ -1,6 +1,7 @@
 package image
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,11 +10,12 @@ import (
 var (
 	defaultTag            = "latest"
 	defaultHost           = "registry-1.docker.io"
+	defaultDockerHost     = "docker.io"
 	defaultSchema         = "docker"
-	errInvalidImageFormat = fmt.Errorf("invalid image format")
+	errInvalidImageFormat = errors.New("invalid image format")
 )
 
-type ImageURI struct {
+type imageUrl struct {
 	HttpSchema string
 	Schema     string
 	Host       string
@@ -23,8 +25,11 @@ type ImageURI struct {
 	Digest     string
 }
 
-func NewImageURI(url string) (*ImageURI, error) {
-	i := &ImageURI{}
+// NewImageUrl initialize an imageUrl struct
+// still need some rules to guard the invalid image format
+func NewImageUrl(url string) (*imageUrl, error) {
+	url = strings.ToLower(url)
+	i := &imageUrl{}
 
 	var fullPath string
 	secs := strings.Split(url, "://")
@@ -32,10 +37,14 @@ func NewImageURI(url string) (*ImageURI, error) {
 		i.Schema = defaultSchema
 		fullPath = secs[0]
 	} else if len(secs) == 2 {
-		i.Schema = strings.ToLower(secs[0])
+		i.Schema = secs[0]
 		fullPath = secs[1]
 	} else {
 		return nil, errInvalidImageFormat
+	}
+
+	if i.Schema != defaultSchema {
+		return nil, fmt.Errorf("%w, currently only support schema docker://", errInvalidImageFormat)
 	}
 
 	fields := strings.Split(fullPath, "/")
@@ -86,6 +95,27 @@ func NewImageURI(url string) (*ImageURI, error) {
 			return nil, errInvalidImageFormat
 		}
 
+		for _, v := range strings.Split(fields[0], ".") {
+			if v == "" {
+				return nil, errInvalidImageFormat
+			}
+		}
+
+		for _, v := range ss {
+			if v == "" {
+				return nil, errInvalidImageFormat
+			}
+		}
+	}
+
+	for _, v := range fields {
+		if v == "" {
+			return nil, errInvalidImageFormat
+		}
+	}
+
+	if i.Host == defaultDockerHost {
+		i.Host = defaultHost
 	}
 
 	i.Name = fullName
@@ -93,7 +123,7 @@ func NewImageURI(url string) (*ImageURI, error) {
 	return i, nil
 }
 
-func (i *ImageURI) String() string {
+func (i *imageUrl) String() string {
 	var fullName string
 	if i.Tag != "" {
 		fullName = i.Name + ":" + i.Tag
@@ -116,6 +146,6 @@ func (i *ImageURI) String() string {
 	return i.Schema + "://" + fullHost + "/" + fullName
 }
 
-func (i *ImageURI) ManifestURL() string {
+func (i *imageUrl) ManifestURL() string {
 	return ""
 }

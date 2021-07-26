@@ -36,7 +36,7 @@ func init() {
 
 func runFetch(args []string) error {
 	url := args[0]
-	img, err := image.NewImageURI(url)
+	img, err := image.NewImageUrl(url)
 	if err != nil {
 		return err
 	}
