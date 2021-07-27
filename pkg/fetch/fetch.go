@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
+	stdUrl "net/url"
 	"strings"
 
 	glog "github.com/goduang/glog"
 	gohttp "github.com/goduang/http"
+	digest "github.com/opencontainers/go-digest"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/chenzhiwei/heze/pkg/image"
 )
@@ -22,23 +24,68 @@ type ImageFetcher struct {
 	authTokens map[string]map[string]string
 }
 
+func (i *ImageFetcher) Fetch(ctx context.Context, img *image.ImageUrl) error {
+	manifestBytes, err := i.FetchManifest(ctx, img)
+	if err != nil {
+		return err
+	}
+
+	glog.V(2).Infof("Image Manifest: %s\n", manifestBytes)
+
+	manifest := &imgspecv1.Manifest{}
+	if err := json.Unmarshal(manifestBytes, manifest); err != nil {
+		return err
+	}
+
+	if manifest.Config.Digest == "" {
+		return fmt.Errorf("Do not support fat image")
+	}
+
+	configBytes, err := i.FetchConfig(ctx, img, manifest.Config.Digest)
+	if err != nil {
+		return err
+	}
+
+	glog.V(2).Infof("Image Config: %s\n", configBytes)
+
+	return nil
+}
+
 func (i *ImageFetcher) FetchManifest(ctx context.Context, img *image.ImageUrl) ([]byte, error) {
 	glog.V(1).Infof("Image Manifest URL: %s\n", img.ManifestURL())
 
+	return i.fetchUrl(ctx, img.ManifestURL(), img.Host, img.Name)
+}
+
+func (i *ImageFetcher) FetchConfig(ctx context.Context, img *image.ImageUrl, digest digest.Digest) ([]byte, error) {
+	configUrl := img.DigestUrl(digest)
+	glog.V(1).Infof("Image Config URL: %s\n", configUrl)
+
+	return i.fetchUrl(ctx, configUrl, img.Host, img.Name)
+}
+
+func (i *ImageFetcher) FetchLayer(ctx context.Context, img *image.ImageUrl, digest digest.Digest, outputDir string) ([]byte, error) {
+	layerUrl := img.DigestUrl(digest)
+	glog.V(1).Infof("Image Config URL: %s\n", layerUrl)
+
+	return i.fetchUrl(ctx, layerUrl, img.Host, img.Name)
+}
+
+func (i *ImageFetcher) fetchUrl(ctx context.Context, url, host, name string) ([]byte, error) {
 	header := http.Header{
 		"Accept": image.DefaultRequestedManifestMIMETypes,
 	}
 
-	authToken, ok := i.authTokens[img.Host]
+	authToken, ok := i.authTokens[host]
 	if ok {
-		token, ok := authToken[img.Name]
+		token, ok := authToken[name]
 		if ok {
 			header.Set("Authorization", "Bearer "+token)
 		}
 	}
 
 	data := &gohttp.HttpRequest{
-		Url:    img.ManifestURL(),
+		Url:    url,
 		Client: http.DefaultClient,
 		Header: header,
 	}
@@ -54,17 +101,17 @@ func (i *ImageFetcher) FetchManifest(ctx context.Context, img *image.ImageUrl) (
 		i.isAuthed = true
 		authHead := res.Header.Get("www-authenticate")
 		glog.V(1).Infof("Auth Header www-authenticate: %s\n", authHead)
-		if err := i.setupAuthTokens(ctx, img, authHead); err != nil {
+		if err := i.setupAuthTokens(ctx, host, authHead); err != nil {
 			return nil, err
 		}
-		return i.FetchManifest(ctx, img)
+		return i.fetchUrl(ctx, url, host, name)
 	} else {
 		glog.V(1).Infof("Res Header: %v, Body: %s\n", res.Header, res.Body)
-		return nil, fmt.Errorf("Failed to fetch manifest, response code %d", res.Code)
+		return nil, fmt.Errorf("Failed to fetch url, response code %d", res.Code)
 	}
 }
 
-func (i *ImageFetcher) setupAuthTokens(ctx context.Context, img *image.ImageUrl, authHead string) error {
+func (i *ImageFetcher) setupAuthTokens(ctx context.Context, host, authHead string) error {
 	authHead = strings.ToLower(authHead)
 	tokens := strings.Split(authHead, ",")
 	if len(tokens) != 3 || !strings.HasPrefix(strings.ToLower(tokens[0]), "bearer realm") {
@@ -96,7 +143,7 @@ func (i *ImageFetcher) setupAuthTokens(ctx context.Context, img *image.ImageUrl,
 
 	glog.V(2).Infof("bearer realm: %s, service: %s, scope: %s\n", realm, service, scope)
 
-	params := url.Values{
+	params := stdUrl.Values{
 		"service": {service},
 		"scope":   {scope},
 	}
@@ -137,7 +184,7 @@ func (i *ImageFetcher) setupAuthTokens(ctx context.Context, img *image.ImageUrl,
 			repo: tokenStruct.Token,
 		}
 
-		i.authTokens[img.Host] = authToken
+		i.authTokens[host] = authToken
 	} else {
 		return fmt.Errorf("Failed to get authToken, response code %d", res.Code)
 	}
@@ -148,4 +195,8 @@ func (i *ImageFetcher) setupAuthTokens(ctx context.Context, img *image.ImageUrl,
 func basicAuth(username, password string) string {
 	auth := username + ":" + password
 	return base64.StdEncoding.EncodeToString([]byte(auth))
+}
+
+func hostFromUrl(url string) string {
+	return strings.Split(url, "/")[2]
 }

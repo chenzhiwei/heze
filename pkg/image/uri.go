@@ -3,9 +3,10 @@ package image
 import (
 	"errors"
 	"fmt"
-	"path"
 	"strconv"
 	"strings"
+
+	"github.com/opencontainers/go-digest"
 )
 
 var (
@@ -14,6 +15,8 @@ var (
 	defaultDockerHost     = "docker.io"
 	defaultSchema         = "docker"
 	errInvalidImageFormat = errors.New("invalid image format")
+	manifestUrlTpl        = "https://%s/v2/%s/manifests/%s"
+	configUrlTpl          = "https://%s/v2/%s/blobs/%s"
 )
 
 type ImageUrl struct {
@@ -161,7 +164,16 @@ func (i *ImageUrl) ManifestURL() string {
 		host = host + ":" + strconv.Itoa(i.Port)
 	}
 
-	return "https://" + path.Join(host, "v2", i.Name, "manifests", ref)
+	return fmt.Sprintf(manifestUrlTpl, host, i.Name, ref)
+}
+
+func (i *ImageUrl) DigestUrl(digest digest.Digest) string {
+	host := i.Host
+	if i.Port != 0 && i.Port != 443 && i.Port != 80 {
+		host = host + ":" + strconv.Itoa(i.Port)
+	}
+
+	return fmt.Sprintf(configUrlTpl, host, i.Name, digest)
 }
 
 func (i *ImageUrl) fullHost() string {

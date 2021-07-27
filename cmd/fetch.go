@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/goduang/glog"
 	"github.com/spf13/cobra"
@@ -52,10 +51,5 @@ func runFetch(args []string) error {
 		Password: password,
 	}
 
-	manifest, err := fc.FetchManifest(ctx, img)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Image Manifest: %s\n", manifest)
-	return nil
+	return fc.Fetch(ctx, img)
 }
