@@ -29,13 +29,6 @@ func (i *ImageFetcher) FetchManifest(ctx context.Context, img *image.ImageUrl) (
 		"Accept": image.DefaultRequestedManifestMIMETypes,
 	}
 
-	if i.Username != "" && i.Password != "" {
-		glog.V(1).Infoln(i.Username, i.Password)
-		// i.isAuthed = true
-		// glog.Fatal(basicAuth(i.Username, i.Password))
-		// header.Set("Authorization", "Basic "+basicAuth(i.Username, i.Password))
-	}
-
 	authToken, ok := i.authTokens[img.Host]
 	if ok {
 		token, ok := authToken[img.Name]
@@ -107,12 +100,17 @@ func (i *ImageFetcher) setupAuthTokens(ctx context.Context, img *image.ImageUrl,
 		"service": {service},
 		"scope":   {scope},
 	}
-
 	reqUrl := realm + "?" + params.Encode()
+
+	header := http.Header{}
+	if i.Username != "" && i.Password != "" {
+		header.Set("Authorization", "Basic "+basicAuth(i.Username, i.Password))
+	}
 
 	data := &gohttp.HttpRequest{
 		Url:    reqUrl,
 		Client: http.DefaultClient,
+		Header: header,
 	}
 
 	res, err := gohttp.MakeRequest(ctx, data)
