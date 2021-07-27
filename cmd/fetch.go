@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/goduang/glog"
 	"github.com/spf13/cobra"
 
 	"github.com/chenzhiwei/heze/pkg/fetch"
@@ -29,7 +30,6 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(fetchCmd)
 	fetchCmd.Flags().StringVarP(&username, "username", "u", "", "username of remote image registry")
 	fetchCmd.Flags().StringVarP(&password, "password", "p", "", "password of remote image registry")
 	fetchCmd.Flags().StringVar(&outputdir, "outputdir", ".", "outputdir of the fetched image")
@@ -42,6 +42,8 @@ func runFetch(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	glog.V(1).Infof("Image URL: %s\n", img)
 
 	ctx := context.TODO()
 
