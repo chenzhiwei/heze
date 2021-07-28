@@ -46,6 +46,11 @@ func (i *ImageFetcher) Fetch(ctx context.Context, img *image.ImageUrl) error {
 		return err
 	}
 
+	layers := manifest.Layers
+	for _, layer := range layers {
+		glog.V(1).Infof("Layer digest: %s, size: %d\n", layer.Digest, layer.Size)
+	}
+
 	glog.V(2).Infof("Image Config: %s\n", configBytes)
 
 	return nil
@@ -66,7 +71,7 @@ func (i *ImageFetcher) FetchConfig(ctx context.Context, img *image.ImageUrl, dig
 
 func (i *ImageFetcher) FetchLayer(ctx context.Context, img *image.ImageUrl, digest digest.Digest, outputDir string) ([]byte, error) {
 	layerUrl := img.DigestUrl(digest)
-	glog.V(1).Infof("Image Config URL: %s\n", layerUrl)
+	glog.V(1).Infof("Image Layer URL: %s\n", layerUrl)
 
 	return i.fetchUrl(ctx, layerUrl, img.Host, img.Name)
 }

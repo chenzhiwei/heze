@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"time"
 
 	"github.com/goduang/glog"
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ var (
 	username  string
 	password  string
 	outputdir string
+	timeout   time.Duration
 
 	fetchCmd = &cobra.Command{
 		Use:   "fetch [image]",
@@ -32,6 +34,7 @@ func init() {
 	fetchCmd.Flags().StringVarP(&username, "username", "u", "", "username of remote image registry")
 	fetchCmd.Flags().StringVarP(&password, "password", "p", "", "password of remote image registry")
 	fetchCmd.Flags().StringVar(&outputdir, "outputdir", ".", "outputdir of the fetched image")
+	fetchCmd.Flags().DurationVar(&timeout, "timeout", 0, "the maximum time allowed to run fetch")
 	fetchCmd.Flags().SortFlags = false
 }
 
@@ -44,7 +47,8 @@ func runFetch(args []string) error {
 
 	glog.V(1).Infof("Image URL: %s\n", img)
 
-	ctx := context.TODO()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	fc := &fetch.ImageFetcher{
 		Username: username,
