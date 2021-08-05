@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	glog "github.com/goduang/glog"
-	gohttp "github.com/goduang/http"
 	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
@@ -209,23 +208,30 @@ func (i *ImageFetcher) requestAuthTokens(ctx context.Context, host, authHead str
 		header.Set("Authorization", "Basic "+basicAuth(i.Username, i.Password))
 	}
 
-	data := &gohttp.HttpRequest{
-		Url:    reqUrl,
-		Client: http.DefaultClient,
-		Header: header,
-	}
-
-	res, err := gohttp.MakeRequest(ctx, data)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
 		return err
 	}
 
-	if res.Code == http.StatusOK {
+	request.Header = header
+	client := http.DefaultClient
+	res, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusOK {
 		tokenStruct := struct {
 			Token string `json:"token"`
 		}{}
 
-		err = json.Unmarshal(res.Body, &tokenStruct)
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+
+		err = json.Unmarshal(body, &tokenStruct)
 		if err != nil {
 			return err
 		}
@@ -235,11 +241,11 @@ func (i *ImageFetcher) requestAuthTokens(ctx context.Context, host, authHead str
 		}
 
 		i.authToken[host] = tokenStruct.Token
-	} else {
-		return fmt.Errorf("Failed to get authToken, response code %d", res.Code)
-	}
 
-	return nil
+		return nil
+	} else {
+		return fmt.Errorf("Failed to get authToken, response code %d", res.StatusCode)
+	}
 }
 
 func basicAuth(username, password string) string {
