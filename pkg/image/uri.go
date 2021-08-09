@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/opencontainers/go-digest"
 )
 
 var (
@@ -105,6 +103,28 @@ func (i *ImageUrl) String() string {
 	return i.Schema + "://" + i.Host + "/" + fullName
 }
 
+func (i *ImageUrl) RepoString() string {
+	var fullName string
+	if i.Tag != "" {
+		fullName = i.Name + ":" + i.Tag
+	}
+
+	if i.Digest != "" {
+		fullName = i.Name + "@" + i.Digest
+	}
+
+	if fullName == "" {
+		fullName = i.Name + ":" + defaultTag
+	}
+
+	host := i.Host
+	if host == defaultHost {
+		host = defaultDockerHost
+	}
+
+	return host + "/" + fullName
+}
+
 func (i *ImageUrl) ManifestURL() string {
 	ref := defaultTag
 	if i.Tag != "" {
@@ -118,6 +138,6 @@ func (i *ImageUrl) ManifestURL() string {
 	return fmt.Sprintf(manifestUrlTpl, i.Host, i.Name, ref)
 }
 
-func (i *ImageUrl) DigestUrl(digest digest.Digest) string {
+func (i *ImageUrl) DigestUrl(digest string) string {
 	return fmt.Sprintf(digestUrlTpl, i.Host, i.Name, digest)
 }

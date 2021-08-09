@@ -1,6 +1,8 @@
 package fetch
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -14,7 +16,6 @@ import (
 	"strings"
 
 	glog "github.com/goduang/glog"
-	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/chenzhiwei/heze/pkg/image"
@@ -27,19 +28,12 @@ type ImageFetcher struct {
 	authToken map[string]string
 }
 
-func (i *ImageFetcher) Fetch(ctx context.Context, img *image.ImageUrl, outputDir string) error {
-	blobDir := outputDir + "/blob"
-	os.MkdirAll(blobDir, 0755)
-
+func (i *ImageFetcher) Fetch(ctx context.Context, img *image.ImageUrl, output string) error {
 	manifestBytes, err := i.FetchManifest(ctx, img)
 	if err != nil {
 		return err
 	}
-
 	glog.V(2).Infof("Image Manifest: %s\n", manifestBytes)
-
-	manifestFile := outputDir + "/manifest.json"
-	os.WriteFile(manifestFile, manifestBytes, 0644)
 
 	manifest := &imgspecv1.Manifest{}
 	if err := json.Unmarshal(manifestBytes, manifest); err != nil {
@@ -47,25 +41,80 @@ func (i *ImageFetcher) Fetch(ctx context.Context, img *image.ImageUrl, outputDir
 	}
 
 	if manifest.Config.Digest == "" {
-		return fmt.Errorf("Do not support fat image")
+		return errors.New("Do not support fat image")
 	}
 
-	configBytes, err := i.FetchConfig(ctx, img, manifest.Config.Digest)
+	savedBytes, err := savedManifest(img, manifest)
 	if err != nil {
 		return err
 	}
 
-	glog.V(2).Infof("Image Config: %s\n", configBytes)
+	tarfile, err := os.Create(output)
+	if err != nil {
+		return err
+	}
+	defer tarfile.Close()
 
-	configFile := outputDir + "/config.json"
-	os.WriteFile(configFile, configBytes, 0644)
+	var fileWriter io.WriteCloser = tarfile
+	tarfileWriter := tar.NewWriter(fileWriter)
+	defer tarfileWriter.Close()
 
+	// write manifest.json
+	manifestHeader := &tar.Header{
+		Name: "manifest.json",
+		Size: int64(len(savedBytes)),
+		Mode: 0644,
+	}
+	err = tarfileWriter.WriteHeader(manifestHeader)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(tarfileWriter, bytes.NewReader(savedBytes))
+	if err != nil {
+		return err
+	}
+
+	// write config.json
+	configBytes, err := i.FetchConfig(ctx, img, string(manifest.Config.Digest))
+	if err != nil {
+		return err
+	}
+
+	configHeader := tarHeader(&manifest.Config, ".json")
+	err = tarfileWriter.WriteHeader(configHeader)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(tarfileWriter, bytes.NewReader(configBytes))
+	if err != nil {
+		return err
+	}
+
+	// write layers to save image tar file
 	layers := manifest.Layers
 	for _, layer := range layers {
 		glog.V(1).Infof("Layer digest: %s, size: %d\n", layer.Digest, layer.Size)
-		layerUrl := img.DigestUrl(layer.Digest)
-		blobfile := blobDir + "/" + string(layer.Digest)
-		i.fetchFile(ctx, layerUrl, blobfile)
+		layerUrl := img.DigestUrl(string(layer.Digest))
+		layerHeader := tarHeader(&layer, ".tar")
+		err = tarfileWriter.WriteHeader(layerHeader)
+		if err != nil {
+			return err
+		}
+
+		res, err := i.makeRequest(ctx, layerUrl)
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode == http.StatusOK {
+			_, err = io.Copy(tarfileWriter, res.Body)
+			if err != nil {
+				return err
+			}
+		} else {
+			return errors.New("Error response")
+		}
 	}
 
 	return nil
@@ -78,8 +127,8 @@ func (i *ImageFetcher) FetchManifest(ctx context.Context, img *image.ImageUrl) (
 	return i.fetchContent(ctx, manifestUrl)
 }
 
-func (i *ImageFetcher) FetchConfig(ctx context.Context, img *image.ImageUrl, digest digest.Digest) ([]byte, error) {
-	configUrl := img.DigestUrl(digest)
+func (i *ImageFetcher) FetchConfig(ctx context.Context, img *image.ImageUrl, digest string) ([]byte, error) {
+	configUrl := img.DigestUrl(string(digest))
 	glog.V(1).Infof("Image Config URL: %s\n", configUrl)
 
 	return i.fetchContent(ctx, configUrl)
@@ -155,7 +204,7 @@ func (i *ImageFetcher) makeRequest(ctx context.Context, url string) (*http.Respo
 	if response.StatusCode == http.StatusUnauthorized && i.isAuthed == false {
 		i.isAuthed = true
 		authHead := response.Header.Get("www-authenticate")
-		glog.V(1).Infof("Auth Header www-authenticate: %s\n", authHead)
+		glog.V(2).Infof("Auth Header www-authenticate: %s\n", authHead)
 		if err := i.requestAuthTokens(ctx, host, authHead); err != nil {
 			return nil, err
 		}
@@ -186,13 +235,13 @@ func (i *ImageFetcher) requestAuthTokens(ctx context.Context, host, authHead str
 	}
 
 	if realm == "" {
-		return fmt.Errorf("missing realm in bearer auth challenge")
+		return errors.New("missing realm in bearer auth challenge")
 	}
 	if service == "" {
-		return fmt.Errorf("missing service in bearer auth challenge")
+		return errors.New("missing service in bearer auth challenge")
 	}
 	if scope == "" {
-		return fmt.Errorf("missing scope in bearer auth challenge")
+		return errors.New("missing scope in bearer auth challenge")
 	}
 
 	glog.V(2).Infof("bearer realm: %s, service: %s, scope: %s\n", realm, service, scope)
@@ -255,4 +304,37 @@ func basicAuth(username, password string) string {
 
 func hostFromUrl(url string) string {
 	return strings.Split(url, "/")[2]
+}
+
+func fileFromDigest(digest, suffix string) string {
+	return strings.Split(digest, ":")[1] + suffix
+}
+
+func tarHeader(d *imgspecv1.Descriptor, suffix string) *tar.Header {
+	header := &tar.Header{}
+
+	header.Name = fileFromDigest(string(d.Digest), suffix)
+	header.Size = d.Size
+	header.Mode = 0644
+
+	return header
+}
+
+func savedManifest(img *image.ImageUrl, manifest *imgspecv1.Manifest) ([]byte, error) {
+	repoTag := img.RepoString()
+	config := fileFromDigest(string(manifest.Config.Digest), ".json")
+	var layers []string
+	for _, layer := range manifest.Layers {
+		layers = append(layers, fileFromDigest(string(layer.Digest), ".tar"))
+	}
+
+	savedManifests := make(image.SavedManifests, 1)
+
+	savedManifests[0] = image.SavedManifest{
+		Config:   config,
+		RepoTags: []string{repoTag},
+		Layers:   layers,
+	}
+
+	return json.Marshal(savedManifests)
 }

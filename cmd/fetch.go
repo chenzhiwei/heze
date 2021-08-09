@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	username  string
-	password  string
-	outputdir string
+	username string
+	password string
+	output   string
 
 	fetchCmd = &cobra.Command{
 		Use:   "fetch [image]",
@@ -31,7 +31,7 @@ var (
 func init() {
 	fetchCmd.Flags().StringVarP(&username, "username", "u", "", "username of remote image registry")
 	fetchCmd.Flags().StringVarP(&password, "password", "p", "", "password of remote image registry")
-	fetchCmd.Flags().StringVar(&outputdir, "outputdir", ".", "outputdir of the fetched image")
+	fetchCmd.Flags().StringVarP(&output, "output", "o", "saved-image.tar", "output file of the fetched image")
 	fetchCmd.Flags().SortFlags = false
 }
 
@@ -51,5 +51,5 @@ func runFetch(args []string) error {
 		Password: password,
 	}
 
-	return fc.Fetch(ctx, img, outputdir)
+	return fc.Fetch(ctx, img, output)
 }
