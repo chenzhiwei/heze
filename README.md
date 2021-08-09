@@ -6,4 +6,8 @@ Heze is an OCI/Docker image fetcher tool, it is a simple binary and can be run a
 
 Heze can fetch the image manifest, configuration, layers as well as the full image tar file.
 
-The fetched image tar file can be loaded by Docker cli.
+The fetched image tar file can be loaded by Docker/Podman cli.
+
+```
+heze fetch amd64/nginx:latest -o nginx.tar
+```
