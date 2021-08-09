@@ -74,28 +74,16 @@ func (i *ImageFetcher) Fetch(ctx context.Context, img *image.ImageUrl, output st
 		return err
 	}
 
-	// write config.json
-	configBytes, err := i.FetchConfig(ctx, img, string(manifest.Config.Digest))
-	if err != nil {
-		return err
-	}
-
-	configHeader := tarHeader(&manifest.Config, ".json")
-	err = tarfileWriter.WriteHeader(configHeader)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(tarfileWriter, bytes.NewReader(configBytes))
-	if err != nil {
-		return err
-	}
-
-	// write layers to save image tar file
-	layers := manifest.Layers
+	// write config+layers to save image tar file
+	layers := append(manifest.Layers, manifest.Config)
 	for _, layer := range layers {
 		glog.V(1).Infof("Layer digest: %s, size: %d\n", layer.Digest, layer.Size)
-		layerUrl := img.DigestUrl(string(layer.Digest))
-		layerHeader := tarHeader(&layer, ".tar")
+		layerUrl := img.DigestUrl(layer.Digest.String())
+		layerHeader := &tar.Header{
+			Name: layer.Digest.String(),
+			Size: layer.Size,
+			Mode: 0644,
+		}
 		err = tarfileWriter.WriteHeader(layerHeader)
 		if err != nil {
 			return err
@@ -128,7 +116,7 @@ func (i *ImageFetcher) FetchManifest(ctx context.Context, img *image.ImageUrl) (
 }
 
 func (i *ImageFetcher) FetchConfig(ctx context.Context, img *image.ImageUrl, digest string) ([]byte, error) {
-	configUrl := img.DigestUrl(string(digest))
+	configUrl := img.DigestUrl(digest)
 	glog.V(1).Infof("Image Config URL: %s\n", configUrl)
 
 	return i.fetchContent(ctx, configUrl)
@@ -306,33 +294,16 @@ func hostFromUrl(url string) string {
 	return strings.Split(url, "/")[2]
 }
 
-func fileFromDigest(digest, suffix string) string {
-	return strings.Split(digest, ":")[1] + suffix
-}
-
-func tarHeader(d *imgspecv1.Descriptor, suffix string) *tar.Header {
-	header := &tar.Header{}
-
-	header.Name = fileFromDigest(string(d.Digest), suffix)
-	header.Size = d.Size
-	header.Mode = 0644
-
-	return header
-}
-
 func savedManifest(img *image.ImageUrl, manifest *imgspecv1.Manifest) ([]byte, error) {
-	repoTag := img.RepoString()
-	config := fileFromDigest(string(manifest.Config.Digest), ".json")
 	var layers []string
 	for _, layer := range manifest.Layers {
-		layers = append(layers, fileFromDigest(string(layer.Digest), ".tar"))
+		layers = append(layers, layer.Digest.String())
 	}
 
 	savedManifests := make(image.SavedManifests, 1)
-
 	savedManifests[0] = image.SavedManifest{
-		Config:   config,
-		RepoTags: []string{repoTag},
+		Config:   manifest.Config.Digest.String(),
+		RepoTags: []string{img.RepoString()},
 		Layers:   layers,
 	}
 
